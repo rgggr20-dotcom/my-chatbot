@@ -92,7 +92,7 @@ def llm_hf_inference(system_prompt: str, user_prompt: str) -> str | None:
         st.warning(f"[HF Inference] {e}")
         return None
 
-  def llm_reply(system_prompt: str, user_prompt: str) -> str:
+def llm_reply(system_prompt: str, user_prompt: str) -> str:
     # 1) test OpenRouter
     out = llm_openrouter(system_prompt, user_prompt)
     if out: return out
