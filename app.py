@@ -127,7 +127,7 @@ for role, content in st.session_state.messages:
     with st.chat_message(role):
         st.write(content)
 
-  user_text = st.chat_input("Tulis laporan Anda…")
+user_text = st.chat_input("Tulis laporan Anda…")
 if user_text:
     # 1) show user message
     st.session_state.messages.append(("user", user_text))
