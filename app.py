@@ -103,13 +103,18 @@ def llm_reply(system_prompt: str, user_prompt: str) -> str:
     return "Terima kasih. Laporan Anda sudah kami terima dan akan diproses. (Catatan: LLM tidak aktif)"
 
 #prompt
-SYSTEM = (
+SYSTEM_CHAT = (
   "Kamu adalah asisten layanan publik Indonesia."
   "Balas dengan sopan dan ringkas. Sebutkan kategori laporan, jika ada sebutkan lokasi tempat (seperti jalan/gang apa, kota, & provinsi) , sebutkan juga instansi tujuan. "
   "Kategori ada jalan berlubang, sampah menumpuk, lampu jalan rusak, dan rambu rusak, jika ada yang tidak cocok dengan kategori, generate kategori baru"
   "Akhiri dengan pertanyaan: 'Kirim sekarang? (y/n)'."
 )
-
+#prompt untuk tiket
+SYSTEM_SUMMARY = (
+  "Kamu adalah sistem pencatat tiket. Buat ringkasan 1–2 kalimat yang padat, "
+  "sebutkan kategori, lokasi (jika ada), dampak/urgensi jika tersirat, dan tanpa bertanya balik. "
+  "JANGAN akhiri dengan pertanyaan."
+)
 def build_user_prompt(user_text: str, label: str, conf: float) -> str:
     tujuan = AGENCY_MAP.get(label, AGENCY_MAP["tidak_tahu"])
     context = (
@@ -141,27 +146,42 @@ if user_text:
 
     # 3) get LLM's response
     uprompt = build_user_prompt(user_text, label, conf)
-    reply = llm_reply(SYSTEM, uprompt)
+    reply = llm_reply(SYSTEM_CHAT, uprompt)
 
     with st.chat_message("assistant"):
         st.write(reply)
-        st.button("✅ Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
+        st.button(" Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
 
     st.session_state.messages.append(("assistant", reply))
     st.rerun()
-
 # send button
 clicked_keys = [k for k in st.session_state.keys() if str(k).startswith("send_")]
 if clicked_keys and st.session_state.pending:
-    # 4) destination and confirmation
+    # 1) buat nomor tiket & tentukan tujuan
     t = ticket_id()
-    tujuan = AGENCY_MAP.get(st.session_state.pending["label"], AGENCY_MAP["tidak_tahu"])
+    label = st.session_state.pending["label"]
+    conf  = st.session_state.pending["conf"]
+    text_ = st.session_state.pending["text"]
+    tujuan = AGENCY_MAP.get(label, AGENCY_MAP["tidak_tahu"])
+
+    # 2) ringkasan tiket
+    summary_user_prompt = (
+        f"Kategori terdeteksi: {label} (confidence {conf:.2f}). "
+        f"Instansi tujuan: {tujuan['nama']} ({tujuan['kontak']}). "
+        f"Teks pengguna: {text_}\n\n"
+        "Tolong buat ringkasan tiket singkat (1–2 kalimat), tanpa bertanya balik."
+    )
+    summary = llm_reply(SYSTEM_SUMMARY, summary_user_prompt)
+
+    # 3) tampilkan konfirmasi terkirim + RINGKASAN dari LLM
     confirmation = (
       f"📨 Terkirim!\n"
       f"• Nomor tiket : {t}\n"
       f"• Tujuan      : {tujuan['nama']} ({tujuan['kontak']})\n"
-      f"• Ringkasan   : {st.session_state.pending['label']} (conf {st.session_state.pending['conf']:.2f})"
+      f"• Ringkasan   : {summary}"
     )
     st.session_state.messages.append(("assistant", confirmation))
+
+    # 4) bersihkan pending
     st.session_state.pending = None
     st.rerun()
