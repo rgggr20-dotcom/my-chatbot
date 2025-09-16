@@ -44,7 +44,59 @@ def classify_text_ml(txt: str, unknown_threshold=0.55):
     if label != "tidak_tahu" and conf < unknown_threshold:
         return "tidak_tahu", conf, scores
     return label, conf, scores
+def clean_val(s: str) -> str:
+    import re
+    s = s.strip(" ,.;:()[]{}")
+    return re.sub(r'\s+', ' ', s)
 
+import re
+RE_STREET = re.compile(r'\b(?:jalan|jl|jln|gang|gg)\.?\s+([A-Za-z0-9 .\-]+)', re.IGNORECASE)
+RE_CITY   = re.compile(r'\b(kota|kab(?:upaten)?|kec(?:amatan)?)\s+([A-Za-z .\-]+)', re.IGNORECASE)
+RE_CITY_FALLBACK = re.compile(r'\bdi\s+([A-Z][A-Za-z .\-]+)$')
+KNOWN_PROV = ["DKI Jakarta","Jawa Barat","Jawa Tengah","DI Yogyakarta","Jawa Timur","Banten"]
+RE_PROV   = re.compile("|".join(map(re.escape, KNOWN_PROV)), re.IGNORECASE)
+
+def extract_fields(text: str) -> dict:
+    out = {}
+    m = RE_STREET.search(text)
+    if m: out["street"] = clean_val(m.group(1))
+    m = RE_CITY.search(text)
+    if m: out["city"] = clean_val(m.group(2))
+    else:
+        m2 = RE_CITY_FALLBACK.search(text)
+        if m2: out["city"] = clean_val(m2.group(1))
+    m = RE_PROV.search(text)
+    if m: out["province"] = m.group(0)
+    return out
+
+def update_form_from_text(text, form, detected_label=None):
+    form["raw_texts"].append(text)
+    if detected_label: form["category"] = detected_label
+    fx = extract_fields(text)
+    for k in ["street","city","province"]:
+        if k in fx and fx[k]:
+            form[k] = fx[k]
+    return form
+
+def next_missing_slot(form):
+    for k in ["street","city","province"]:
+        if not form.get(k):
+            return k
+    return None
+
+def ask_for(slot):
+    if slot == "street": return "Alamat jalannya apa ya?"
+    if slot == "city": return "Ini di kota/kabupaten mana ya?"
+    if slot == "province": return "Provinsinya di mana ya?"
+    return None
+
+def format_location(form):
+    parts = []
+    if form.get("street"):   parts.append(f"Jalan/Gang: {form['street']}")
+    if form.get("city"):     parts.append(f"Kota/Kab: {form['city']}")
+    if form.get("province"): parts.append(f"Provinsi: {form['province']}")
+    return " | ".join(parts) if parts else "(lokasi belum lengkap)"
+    
 def llm_openrouter(system_prompt: str, user_prompt: str) -> str | None:
     api_key = st.secrets.get("OPENROUTER_API_KEY", None)
     if not api_key: return None
