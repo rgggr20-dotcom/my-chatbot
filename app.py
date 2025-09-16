@@ -126,8 +126,13 @@ def build_user_prompt(user_text: str, label: str, conf: float) -> str:
 def ticket_id():
     return "TCK-" + time.strftime("%Y%m%d") + "-" + uuid.uuid4().hex[:6].upper()
 
-if "messages" not in st.session_state: st.session_state.messages = []
-if "pending"  not in st.session_state: st.session_state.pending = None  # simpan {label, conf, text}
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "pending" not in st.session_state:
+    st.session_state.pending = None  # {label, conf, text}
+if "form" not in st.session_state:
+    st.session_state.form = {"category": None, "street": None, "city": None, "province": None, "raw_texts": []}
+
 
 for role, content in st.session_state.messages:
     with st.chat_message(role):
@@ -135,53 +140,79 @@ for role, content in st.session_state.messages:
 
 user_text = st.chat_input("Tulis laporan Anda…")
 if user_text:
-    # 1) show user message
+    # tampilkan user
     st.session_state.messages.append(("user", user_text))
     with st.chat_message("user"):
         st.write(user_text)
 
-    # 2) classify
+    # klasifikasi
     label, conf, scores = classify_text_ml(user_text, unknown_threshold=UNKNOWN_THRESHOLD)
     st.session_state.pending = {"label": label, "conf": conf, "text": user_text}
 
-    # 3) get LLM's response
-    uprompt = build_user_prompt(user_text, label, conf)
-    reply = llm_reply(SYSTEM_CHAT, uprompt)
+    # update form (overwrite kalau ada koreksi)
+    st.session_state.form = update_form_from_text(
+        user_text,
+        st.session_state.form,
+        detected_label=label
+    )
 
-    with st.chat_message("assistant"):
-        st.write(reply)
-        st.button(" Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
+    # cek slot kosong
+    need = next_missing_slot(st.session_state.form)
+    if need:
+        q = ask_for(need)
+        bot_msg = (
+            f"Kategori terdeteksi: **{label}** (conf {conf:.2f})\n"
+            f"Lokasi saat ini: {format_location(st.session_state.form)}\n\n"
+            f"{q}"
+        )
+        st.session_state.messages.append(("assistant", bot_msg))
+        with st.chat_message("assistant"): st.write(bot_msg)
 
-    st.session_state.messages.append(("assistant", reply))
+    else:
+        # semua slot lengkap → minta konfirmasi via LLM
+        tujuan = AGENCY_MAP.get(label, AGENCY_MAP["tidak_tahu"])
+        uprompt = build_user_prompt(
+            f"{user_text}\n\nLokasi terstruktur: {format_location(st.session_state.form)}",
+            label, conf
+        )
+        reply = llm_reply(SYSTEM_CHAT, uprompt)
+
+        st.session_state.messages.append(("assistant", reply))
+        with st.chat_message("assistant"):
+            st.write(reply)
+            st.button("Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
+
     st.rerun()
 # send button
 clicked_keys = [k for k in st.session_state.keys() if str(k).startswith("send_")]
 if clicked_keys and st.session_state.pending:
-    # 1) buat nomor tiket & tentukan tujuan
     t = ticket_id()
     label = st.session_state.pending["label"]
     conf  = st.session_state.pending["conf"]
     text_ = st.session_state.pending["text"]
     tujuan = AGENCY_MAP.get(label, AGENCY_MAP["tidak_tahu"])
+    loc_struct = format_location(st.session_state.form)
 
-    # 2) ringkasan tiket
     summary_user_prompt = (
-        f"Kategori terdeteksi: {label} (confidence {conf:.2f}). "
+        f"Kategori: {label} (confidence {conf:.2f}). "
+        f"Lokasi: {loc_struct}. "
         f"Instansi tujuan: {tujuan['nama']} ({tujuan['kontak']}). "
-        f"Teks pengguna: {text_}\n\n"
-        "Tolong buat ringkasan tiket singkat (1–2 kalimat), tanpa bertanya balik."
+        f"Teks pengguna (gabungan): {' | '.join(st.session_state.form['raw_texts'])}\n\n"
+        "Buat ringkasan tiket singkat (1–2 kalimat), tanpa bertanya balik."
     )
     summary = llm_reply(SYSTEM_SUMMARY, summary_user_prompt)
 
-    # 3) tampilkan konfirmasi terkirim + RINGKASAN dari LLM
     confirmation = (
       f"📨 Terkirim!\n"
       f"• Nomor tiket : {t}\n"
       f"• Tujuan      : {tujuan['nama']} ({tujuan['kontak']})\n"
+      f"• Lokasi      : {loc_struct}\n"
       f"• Ringkasan   : {summary}"
     )
     st.session_state.messages.append(("assistant", confirmation))
 
-    # 4) bersihkan pending
+    # reset state untuk laporan berikut
     st.session_state.pending = None
+    st.session_state.form = {"category": None, "street": None, "city": None, "province": None, "raw_texts": []}
     st.rerun()
+
