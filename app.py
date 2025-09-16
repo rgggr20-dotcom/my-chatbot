@@ -105,7 +105,7 @@ def llm_reply(system_prompt: str, user_prompt: str) -> str:
 #prompt
 SYSTEM_CHAT = (
   "Kamu adalah asisten layanan publik Indonesia."
-  "Balas dengan sopan dan ringkas. Sebutkan kategori laporan, jika ada sebutkan lokasi tempat (seperti jalan/gang apa, kota, & provinsi) , sebutkan juga instansi tujuan. "
+  "Balas dengan sopan dan ringkas. Mulai dengan berterima kasih pada user, kemudian sebutkan kategori laporan, jika ada sebutkan lokasi tempat (seperti jalan/gang apa, kota, & provinsi) , sebutkan juga instansi tujuan. Sebutkan dalam format list"
   "Kategori ada jalan berlubang, sampah menumpuk, lampu jalan rusak, dan rambu rusak, jika ada yang tidak cocok dengan kategori, generate kategori baru"
   "Akhiri dengan pertanyaan: 'Kirim sekarang? (y/n)'."
 )
