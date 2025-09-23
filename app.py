@@ -3,25 +3,6 @@ import os, json, time, uuid, re
 import numpy as np
 import streamlit as st
 import joblib, requests, httpx
-
-try:
-    from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-except Exception as e:
-    import streamlit as st
-    st.error(
-        "Gagal memuat 'transformers'. Pastikan 'requirements.txt' sudah berisi "
-        "transformers==4.42.4, tokenizers==0.19.1, torch==2.2.2, huggingface-hub==0.23.4, safetensors==0.4.3 "
-        f"(detail: {e})"
-    )
-    st.stop()
-
-@st.cache_resource(show_spinner=False)
-def load_ner_model():
-    MODEL_NER = "indolem/indobert-base-uncased-ner"
-    tok = AutoTokenizer.from_pretrained(MODEL_NER)
-    ner_model = AutoModelForTokenClassification.from_pretrained(MODEL_NER)
-    nlp = pipeline("ner", model=ner_model, tokenizer=tok, aggregation_strategy="simple")
-    return nlp
     
 # =========[ UI & CONFIG ]=========
 st.set_page_config(page_title="Chatbot Laporan Publik", page_icon="🛠️")
@@ -133,7 +114,7 @@ from transformers import AutoTokenizer, AutoModelForTokenClassification, pipelin
 
 @st.cache_resource(show_spinner=False)
 def load_ner_model():
-    MODEL_NER = "indolem/indobert-base-uncased-ner"
+    MODEL_NER = "cahya/bert-base-indonesian-NER"
     tok = AutoTokenizer.from_pretrained(MODEL_NER)
     ner_model = AutoModelForTokenClassification.from_pretrained(MODEL_NER)
     nlp = pipeline("ner", model=ner_model, tokenizer=tok, aggregation_strategy="simple")
