@@ -288,31 +288,31 @@ if user_text:
     mode = st.session_state.mode
 
     if mode == "awaiting_city":
-    st.session_state.form["city"] = normalize_city_name(user_text)
-    need = next_missing_slot(st.session_state.form)
-    if need:
-        st.session_state.mode = f"awaiting_{need}"
-        q = ask_for(need)
-        bot_msg = (
-            f"Terima kasih. Lokasi sekarang: {format_location(st.session_state.form)}\n\n{q}"
-        )
-        st.session_state.messages.append(("assistant", bot_msg))
-        with st.chat_message("assistant"): st.write(bot_msg)
-        st.rerun()
-    else:
-        st.session_state.mode = "awaiting_report"
-        label = st.session_state.pending["label"] if st.session_state.pending else st.session_state.form.get("category", "tidak_tahu")
-        conf  = st.session_state.pending["conf"]  if st.session_state.pending else 0.5
-        last_text = st.session_state.form["raw_texts"][-1] if st.session_state.form["raw_texts"] else user_text
-        loc_struct = format_location(st.session_state.form)
-        uprompt = build_user_prompt(last_text, label, conf, loc_struct)
-        reply = llm_reply(SYSTEM_CHAT, uprompt)
-
-        st.session_state.messages.append(("assistant", reply))
-        with st.chat_message("assistant"):
-            st.write(reply)
-            st.button("✅ Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
-        st.rerun()
+        st.session_state.form["city"] = normalize_city_name(user_text)
+        need = next_missing_slot(st.session_state.form)
+        if need:
+            st.session_state.mode = f"awaiting_{need}"
+            q = ask_for(need)
+            bot_msg = (
+                f"Terima kasih. Lokasi sekarang: {format_location(st.session_state.form)}\n\n{q}"
+            )
+            st.session_state.messages.append(("assistant", bot_msg))
+            with st.chat_message("assistant"): st.write(bot_msg)
+            st.rerun()
+        else:
+            st.session_state.mode = "awaiting_report"
+            label = st.session_state.pending["label"] if st.session_state.pending else st.session_state.form.get("category", "tidak_tahu")
+            conf  = st.session_state.pending["conf"]  if st.session_state.pending else 0.5
+            last_text = st.session_state.form["raw_texts"][-1] if st.session_state.form["raw_texts"] else user_text
+            loc_struct = format_location(st.session_state.form)
+            uprompt = build_user_prompt(last_text, label, conf, loc_struct)
+            reply = llm_reply(SYSTEM_CHAT, uprompt)
+    
+            st.session_state.messages.append(("assistant", reply))
+            with st.chat_message("assistant"):
+                st.write(reply)
+                st.button("✅ Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
+            st.rerun()
 
     # ---- MODE: mengisi Province saja (tanpa klasifikasi) ----
     if mode == "awaiting_province":
