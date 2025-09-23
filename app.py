@@ -163,6 +163,15 @@ def _pick_city(text: str, loc_spans: list[str]) -> str | None:
         return None
     candidates.sort(key=lambda x: len(x))
     return _title_keep_upper(_clean(candidates[0]))
+    
+def normalize_city_name(s: str) -> str:
+    t = _clean(s)
+    tl = t.lower()
+    for p in ["kota", "kabupaten", "kab", "kodya", "kec", "kecamatan"]:
+        if tl.startswith(p + " "):
+            t = t[len(p) + 1:]  # buang prefix + spasi
+            break
+    return _title_keep_upper(t)
 
 def extract_fields(text: str) -> dict:
     """
@@ -278,13 +287,31 @@ if user_text:
 
     mode = st.session_state.mode
 
-    # ---- MODE: mengisi City saja (tanpa klasifikasi) ----
     if mode == "awaiting_city":
-        st.session_state.form["city"] = _title_keep_upper(_clean(user_text))
-        st.session_state.mode = "awaiting_report"
-        bot_msg = f"Terima kasih. Lokasi sekarang: {format_location(st.session_state.form)}"
+    st.session_state.form["city"] = normalize_city_name(user_text)
+    need = next_missing_slot(st.session_state.form)
+    if need:
+        st.session_state.mode = f"awaiting_{need}"
+        q = ask_for(need)
+        bot_msg = (
+            f"Terima kasih. Lokasi sekarang: {format_location(st.session_state.form)}\n\n{q}"
+        )
         st.session_state.messages.append(("assistant", bot_msg))
         with st.chat_message("assistant"): st.write(bot_msg)
+        st.rerun()
+    else:
+        st.session_state.mode = "awaiting_report"
+        label = st.session_state.pending["label"] if st.session_state.pending else st.session_state.form.get("category", "tidak_tahu")
+        conf  = st.session_state.pending["conf"]  if st.session_state.pending else 0.5
+        last_text = st.session_state.form["raw_texts"][-1] if st.session_state.form["raw_texts"] else user_text
+        loc_struct = format_location(st.session_state.form)
+        uprompt = build_user_prompt(last_text, label, conf, loc_struct)
+        reply = llm_reply(SYSTEM_CHAT, uprompt)
+
+        st.session_state.messages.append(("assistant", reply))
+        with st.chat_message("assistant"):
+            st.write(reply)
+            st.button("✅ Kirim ke instansi", key=f"send_{len(st.session_state.messages)}")
         st.rerun()
 
     # ---- MODE: mengisi Province saja (tanpa klasifikasi) ----
