@@ -11,7 +11,8 @@ st.title("🛠️ Chatbot Laporan Publik (Prototype)")
 # ====== Paths & Config ======
 CLS_MODEL_PATH  = "models/text_cls_tfidf_lr.joblib"
 CLS_LABELS_PATH = "models/text_labels.json"
-NER_LOCAL_DIR   = "export/ner_loc/best"  # opsional jika kamu commit folder model
+NER_LOCAL_DIR   = None
+NER_MODEL_ID    = "rggrggr/ner-lokasi-public-damage"
 UNKNOWN_LABEL   = "tidak_tahu"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -35,20 +36,15 @@ def load_cls():
 
 @st.cache_resource(show_spinner=False)
 def load_ner_manual():
-    # 1) lokal
-    if os.path.isdir(NER_LOCAL_DIR) and os.path.isfile(os.path.join(NER_LOCAL_DIR, "config.json")):
-        src   = NER_LOCAL_DIR
-        token = None
+    if NER_LOCAL_DIR and os.path.isdir(NER_LOCAL_DIR):
+        src, token = NER_LOCAL_DIR, None
     else:
-        # 2) Hugging Face Hub
-        src   = st.secrets.get("NER_MODEL_ID", None)
+        src   = st.secrets.get("NER_MODEL_ID", "username/ner-lokasi-public-damage")
         token = st.secrets.get("HF_API_TOKEN", None)
-        if not src:
-            st.warning("NER model tidak ditemukan (NER_MODEL_ID kosong). NER dimatikan.")
-            return None, None
     tok = AutoTokenizer.from_pretrained(src, use_auth_token=token, use_fast=True)
     mdl = AutoModelForTokenClassification.from_pretrained(src, use_auth_token=token).to(DEVICE).eval()
     return tok, mdl
+
 
 cls_pipe, CLS_LABELS = load_cls()
 tok_ner, mdl_ner = load_ner_manual()
