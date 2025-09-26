@@ -4,23 +4,21 @@ import streamlit as st
 import joblib, torch
 from transformers import AutoTokenizer, AutoModelForTokenClassification
 
-# ====== UI ======
+# ========= UI & Config =========
 st.set_page_config(page_title="Chatbot Laporan Publik", page_icon="🛠️")
 st.title("🛠️ Chatbot Laporan Publik (Prototype)")
+DEBUG = st.sidebar.toggle("Debug mode", value=False)
 
-# ====== Paths & Config ======
 CLS_MODEL_PATH  = "models/text_cls_tfidf_lr.joblib"
 CLS_LABELS_PATH = "models/text_labels.json"
-NER_LOCAL_DIR   = None
-NER_MODEL_ID    = "rggrggr/ner-lokasi-public-damage"
-
 UNKNOWN_LABEL   = "tidak_tahu"
-tok = AutoTokenizer.from_pretrained("rggrggr/ner-lokasi-public-damage", use_fast=True)
-mdl = AutoModelForTokenClassification.from_pretrained("rggrggr/ner-lokasi-public-damage")
 
+NER_MODEL_ID    = st.secrets.get("NER_MODEL_ID", "")      # ex: "username/ner-lokasi-public-damage"
+HF_API_TOKEN    = st.secrets.get("HF_API_TOKEN", None)    # required if repo private
+BASE_TOKENIZER  = "indobenchmark/indobert-base-p1"        # fallback tokenizer
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-THRESHOLD = st.sidebar.slider("Ambang 'tidak_tahu'", 0.30, 0.90, 0.60, 0.01)
+DEVICE   = "cuda" if torch.cuda.is_available() else "cpu"
+THRESH   = st.sidebar.slider("Ambang 'tidak_tahu'", 0.30, 0.90, 0.60, 0.01)
 
 AGENCY_MAP = {
     "jalan_berlubang":  ("Dinas Bina Marga / PU",           "bina-marga@pemda.go.id"),
@@ -30,30 +28,65 @@ AGENCY_MAP = {
     "tidak_tahu":       ("Pusat Layanan Publik",             "contact-center@pemda.go.id"),
 }
 
-# ====== Loaders ======
+def _exists(p):
+    try:
+        return os.path.exists(p) and (os.path.getsize(p) > 0 if os.path.isfile(p) else True)
+    except:
+        return False
+
+# ========= Loaders (anti-crash) =========
 @st.cache_resource(show_spinner=False)
 def load_cls():
-    pipe = joblib.load(CLS_MODEL_PATH)
-    with open(CLS_LABELS_PATH, "r", encoding="utf-8") as f:
-        labels = json.load(f)
-    return pipe, labels
+    try:
+        assert _exists(CLS_MODEL_PATH), f"Missing {CLS_MODEL_PATH}"
+        assert _exists(CLS_LABELS_PATH), f"Missing {CLS_LABELS_PATH}"
+        pipe = joblib.load(CLS_MODEL_PATH)
+        with open(CLS_LABELS_PATH, "r", encoding="utf-8") as f:
+            labels = json.load(f)
+        return pipe, labels, None
+    except Exception as e:
+        return None, None, e
 
 @st.cache_resource(show_spinner=False)
-def load_ner_manual():
-    if NER_LOCAL_DIR and os.path.isdir(NER_LOCAL_DIR):
-        src, token = NER_LOCAL_DIR, None
-    else:
-        src   = st.secrets.get("NER_MODEL_ID", "username/ner-lokasi-public-damage")
-        token = st.secrets.get("HF_API_TOKEN", None)
-    tok = AutoTokenizer.from_pretrained(src, use_auth_token=token, use_fast=True)
-    mdl = AutoModelForTokenClassification.from_pretrained(src, use_auth_token=token).to(DEVICE).eval()
-    return tok, mdl
+def load_ner_robust():
+    if not NER_MODEL_ID:
+        return None, None, RuntimeError("NER_MODEL_ID secret is empty.")
+    try:
+        try:
+            tok = AutoTokenizer.from_pretrained(NER_MODEL_ID, use_auth_token=HF_API_TOKEN, use_fast=True)
+        except Exception:
+            tok = AutoTokenizer.from_pretrained(BASE_TOKENIZER, use_fast=True)
+        mdl = AutoModelForTokenClassification.from_pretrained(
+            NER_MODEL_ID, use_auth_token=HF_API_TOKEN
+        ).to(DEVICE).eval()
+        return tok, mdl, None
+    except Exception as e:
+        return None, None, e
 
+cls_pipe, CLS_LABELS, cls_err = load_cls()
+tok_ner, mdl_ner, ner_err     = load_ner_robust()
 
-cls_pipe, CLS_LABELS = load_cls()
-tok_ner, mdl_ner = load_ner_manual()
+if DEBUG:
+    st.sidebar.markdown("### Diagnostics")
+    st.sidebar.write({
+        "joblib_exists": _exists(CLS_MODEL_PATH),
+        "labels_exists": _exists(CLS_LABELS_PATH),
+        "NER_MODEL_ID": NER_MODEL_ID or None,
+        "HF_TOKEN?": bool(HF_API_TOKEN),
+        "cls_err": str(cls_err) if cls_err else None,
+        "ner_err": str(ner_err) if ner_err else None,
+        "device": DEVICE,
+    })
 
-# ====== Helpers: Klasifikasi, NER, Ringkasan ======
+if cls_pipe is None:
+    st.error(
+        "Model klasifikasi belum siap.\n"
+        f"- Pastikan ada: `{CLS_MODEL_PATH}` dan `{CLS_LABELS_PATH}`\n"
+        "Lalu reload halaman."
+    )
+    st.stop()
+
+# ========= Core functions =========
 def classify_text(text: str, threshold: float = 0.60):
     probs = cls_pipe.predict_proba([text])[0]
     idx   = int(np.argmax(probs))
@@ -63,7 +96,7 @@ def classify_text(text: str, threshold: float = 0.60):
     return label, conf
 
 def ner_predict(text: str):
-    if not tok_ner or not mdl_ner:
+    if not (tok_ner and mdl_ner):
         return []
     enc = tok_ner(text, return_offsets_mapping=True, return_tensors="pt", truncation=True, max_length=256)
     offsets = enc.pop("offset_mapping")[0].tolist()
@@ -74,7 +107,7 @@ def ner_predict(text: str):
 
     ents, cur = [], None
     for (start, end), idx in zip(offsets, pred_ids):
-        if start == end:
+        if start == end:  # special tokens
             continue
         label = id2label[int(idx)]
         if label == "O":
@@ -100,17 +133,16 @@ def ner_extract(text: str):
     locs = [e["word"].strip() for e in ents if e.get("entity_group") and e["entity_group"]!="O"]
     out = {"street": None, "city": None, "province": None}
 
-    def _clean(s):  return re.sub(r"\s+", " ", s.strip(" ,.;:()[]{}"))
+    def _clean(s):  return re.sub(r"\s+"," ", s.strip(" ,.;:()[]{}"))
     def _title(s):  return " ".join(w.upper() if w.upper() in {"RT","RW","GG","PJU"} else w.capitalize() for w in s.split())
     def _looks_prov(s):
         t=_clean(s)
         return bool(re.match(r"(?i)^provinsi\s+\w+", t) or re.match(r"(?i)^(DI|Daerah Istimewa)\s+\w+", t))
 
-    street_prefixes = ("jalan","jl","jln","gang","gg")
-    streets = [s for s in locs if s.lower().startswith(street_prefixes)]
+    streets = [s for s in locs if s.lower().startswith(("jalan","jl","jln","gang","gg"))]
     if streets:
         streets.sort(key=len, reverse=True)
-        out["street"] = _title(_clean(re.sub(r"\b(ada|banyak|gundukan|sampah|lubang|rusak|mati|menumpuk).*$","",streets[0], flags=re.IGNORECASE)))
+        out["street"] = _title(_clean(re.sub(r"\b(ada|banyak|sampah|lubang|rusak|mati|menumpuk|tidak nyala|tidak menyala).*$","",streets[0], flags=re.IGNORECASE)))
 
     provs = [s for s in locs if _looks_prov(s)]
     if provs:
@@ -128,7 +160,9 @@ def ner_extract(text: str):
         out["city"] = _title(rem[0])
 
     if out.get("street"):
-        for kw in [" Jakarta"," Bandung"," Surabaya"," Semarang"," Yogyakarta"," Medan"," Makassar"," Malang"," Depok"," Bekasi"]:
+        # bila nama kota “nempel” di street (contoh: "Jalan Pattimura Kota Bandung")
+        known = [" Jakarta"," Bandung"," Surabaya"," Semarang"," Yogyakarta"," Medan"," Makassar"," Malang"," Depok"," Bekasi"," Tangerang"," Bogor"]
+        for kw in known:
             if kw.lower().strip() in out["street"].lower():
                 out["street"] = _title(_clean(out["street"].replace(kw.strip(), "")))
                 out["city"]   = _title(kw.strip())
@@ -148,7 +182,7 @@ def ticket_id():
 def normalize_yesno(s: str) -> str:
     s = (s or "").strip().lower()
     yes = {"y","ya","yes","ok","oke","kirim","send","iya","yup"}
-    no  = {"n","no","tidak","jangan","batal","cancel","nggak","ga"}
+    no  = {"n","no","tidak","jangan","batal","cancel","nggak","ga","gak"}
     if s in yes: return "yes"
     if s in no:  return "no"
     return ""
@@ -162,7 +196,7 @@ def build_confirmation(label: str, conf: float, loc: dict):
         f"Kirim sekarang? (y/n)"
     )
 
-# ====== Session State ======
+# ========= Session =========
 if "messages" not in st.session_state: st.session_state.messages = []
 if "pending"  not in st.session_state: st.session_state.pending  = None  # {'text','label','conf','loc'}
 
@@ -171,13 +205,12 @@ for role, content in st.session_state.messages:
     with st.chat_message(role):
         st.write(content)
 
-# ====== Chat Loop ======
+# ========= Chat loop =========
 user_text = st.chat_input("Tulis laporan Anda…")
 if user_text:
     with st.chat_message("user"): st.write(user_text)
     st.session_state.messages.append(("user", user_text))
 
-    # jika sedang menunggu konfirmasi
     if st.session_state.pending:
         ans = normalize_yesno(user_text)
         if ans == "yes":
@@ -197,16 +230,15 @@ if user_text:
 
         elif ans == "no":
             st.session_state.pending = None
-            with st.chat_message("assistant"):
-                st.write("Baik, dibatalkan. Silakan kirim ulang laporan dengan perbaikan yang diperlukan.")
-            st.session_state.messages.append(("assistant", "Dibatalkan oleh pengguna."))
+            msg = "Baik, dibatalkan. Silakan kirim ulang laporan dengan perbaikan yang diperlukan."
+            with st.chat_message("assistant"): st.write(msg)
+            st.session_state.messages.append(("assistant", msg))
             st.stop()
 
         else:
-            # anggap ini info tambahan: gabungkan & re-run NER/klasifikasi
-            base_text = st.session_state.pending["text"]
-            merged = base_text.strip() + ". " + user_text.strip()
-            label, conf = classify_text(merged, THRESHOLD)
+            # info tambahan: gabungkan & re-proses
+            merged = st.session_state.pending["text"].strip() + ". " + user_text.strip()
+            label, conf = classify_text(merged, THRESH)
             loc = ner_extract(merged)
             st.session_state.pending = {"text": merged, "label": label, "conf": conf, "loc": loc}
             reply = build_confirmation(label, conf, loc)
@@ -214,8 +246,8 @@ if user_text:
             st.session_state.messages.append(("assistant", reply))
             st.stop()
 
-    # tidak sedang menunggu: proses teks baru
-    label, conf = classify_text(user_text, THRESHOLD)
+    # permintaan baru
+    label, conf = classify_text(user_text, THRESH)
     loc = ner_extract(user_text)
     st.session_state.pending = {"text": user_text, "label": label, "conf": conf, "loc": loc}
     reply = build_confirmation(label, conf, loc)
