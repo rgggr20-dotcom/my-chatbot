@@ -14,6 +14,9 @@ CLS_LABELS_PATH = "models/text_labels.json"
 NER_LOCAL_DIR   = None
 NER_MODEL_ID    = "rggrggr/ner-lokasi-public-damage"
 UNKNOWN_LABEL   = "tidak_tahu"
+tok = AutoTokenizer.from_pretrained("rggrggr/ner-lokasi-public-damage", use_fast=True)
+mdl = AutoModelForTokenClassification.from_pretrained("rggrggr/ner-lokasi-public-damage")
+
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 THRESHOLD = st.sidebar.slider("Ambang 'tidak_tahu'", 0.30, 0.90, 0.60, 0.01)
