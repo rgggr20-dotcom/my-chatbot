@@ -13,7 +13,7 @@ CLS_MODEL_PATH  = "models/text_cls_tfidf_lr.joblib"
 CLS_LABELS_PATH = "models/text_labels.json"
 NER_LOCAL_DIR   = None
 NER_MODEL_ID    = "rggrggr/ner-lokasi-public-damage"
-NER_MODEL_DIR   = "rggrggr/ner-lokasi-public-damage"
+
 UNKNOWN_LABEL   = "tidak_tahu"
 tok = AutoTokenizer.from_pretrained("rggrggr/ner-lokasi-public-damage", use_fast=True)
 mdl = AutoModelForTokenClassification.from_pretrained("rggrggr/ner-lokasi-public-damage")
